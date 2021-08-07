@@ -1,9 +1,9 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.InteropServices;
+using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
+using UnityEngine.Rendering;
 using UnityEngine.Scripting;
 using UnityEngine.XR.ARSubsystems;
 
@@ -12,140 +12,72 @@ namespace UnityEngine.XR.Mock
     [Preserve]
     public sealed class UnityXRMockCameraSubsystem : XRCameraSubsystem
     {
-
-        #region Constants
-
-        public const string ID = "UnityXRMock-Camera";
-
-        #endregion
-
-        #region Fields
-
-        private bool isInitialized;
-        private XRCameraSubsystem wrappedSubsystem;
-        private static XRCameraSubsystemDescriptor originalDescriptor;
-
-        #endregion
-
-        #region Constructors
-
-        public UnityXRMockCameraSubsystem()
-        {
-            this.Initialize();
-        }
-
-        #endregion
-
-        #region XRCameraSubsystem
-
-        protected override IProvider CreateProvider()
-        {
-            this.Initialize();
-            return this.wrappedSubsystem?.GetType()
-                                         .GetMethod(nameof(CreateProvider), BindingFlags.NonPublic | BindingFlags.Instance)
-                                         .Invoke(this.wrappedSubsystem, null) as IProvider ?? new Provider();
-        }
-
-        #endregion
-
-        #region Internal methods
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         internal static void Register()
         {
-            var descriptor = GetSubsystemDescriptor();
-            RegisterDescriptor(descriptor);
+            // Clone descriptor
+            var cinfo = new XRCameraSubsystemCinfo
+            {
+                id = typeof(UnityXRMockCameraSubsystem).FullName,
+                providerType = typeof(MockProvider),
+                subsystemTypeOverride = typeof(UnityXRMockCameraSubsystem),
+                supportsAverageBrightness = true,
+                supportsAverageColorTemperature = true,
+                supportsAverageIntensityInLumens = true,
+                supportsCameraConfigurations = false,
+                supportsCameraImage = true,
+                supportsColorCorrection = true,
+                supportsDisplayMatrix = true,
+                supportsFocusModes = false,
+                supportsProjectionMatrix = true,
+                supportsTimestamp = true,
+                supportsCameraGrain = true,
+                supportsFaceTrackingAmbientIntensityLightEstimation = true,
+                supportsFaceTrackingHDRLightEstimation = true,
+                supportsWorldTrackingAmbientIntensityLightEstimation = true,
+                supportsWorldTrackingHDRLightEstimation = true
+            };
+
+            Register(cinfo);
         }
 
-        #endregion
-
-        #region Private methods
-
-        private void Initialize()
-        {
-            if (this.isInitialized)
-            {
-                return;
-            }
-
-            if (!UnityXRMockActivator.Active)
-            {
-                if (originalDescriptor == null)
-                {
-                    originalDescriptor = GetSubsystemDescriptor();
-                }
-
-                this.wrappedSubsystem = originalDescriptor?.Create();
-            }
-
-            this.isInitialized = true;
-        }
-
-        private static void RegisterDescriptor(XRCameraSubsystemDescriptor overrideDescriptor = default)
-        {
-            if (overrideDescriptor != null)
-            {
-                // Clone descriptor
-                var cinfo = new XRCameraSubsystemCinfo
-                {
-                    id = overrideDescriptor.id,
-                    implementationType = overrideDescriptor.subsystemImplementationType,
-                    supportsAverageBrightness = overrideDescriptor.supportsAverageBrightness,
-                    supportsAverageColorTemperature = overrideDescriptor.supportsAverageColorTemperature,
-                    supportsCameraConfigurations = overrideDescriptor.supportsCameraConfigurations,
-                    supportsCameraImage = overrideDescriptor.supportsCameraImage,
-                    //supportsColorCorrection = overrideDescriptor.supportsColorCorrection,
-                    supportsDisplayMatrix = overrideDescriptor.supportsDisplayMatrix,
-                    supportsProjectionMatrix = overrideDescriptor.supportsProjectionMatrix,
-                    //supportsTimestamp = overrideDescriptor.supportsTimestampsupportsTimestamp,
-                };
-
-                originalDescriptor = typeof(XRCameraSubsystemDescriptor).GetConstructors(BindingFlags.NonPublic | BindingFlags.Instance)[0]
-                                                                        .Invoke(new object[] { cinfo }) as XRCameraSubsystemDescriptor;
-
-                // Override subsystem
-                overrideDescriptor.subsystemImplementationType = typeof(UnityXRMockCameraSubsystem);
-            }
-            else
-            {
-                // Clone descriptor
-                var cinfo = new XRCameraSubsystemCinfo
-                {
-                    id = ID,
-                    implementationType = typeof(UnityXRMockCameraSubsystem),
-                    supportsAverageBrightness = true,
-                    supportsAverageColorTemperature = true,
-                    supportsCameraConfigurations = false,
-                    supportsCameraImage = true,
-                    supportsColorCorrection = false,
-                    supportsDisplayMatrix = true,
-                    supportsProjectionMatrix = true,
-                    supportsTimestamp = true,
-                };
-
-                Register(cinfo);
-            }
-        }
-
-        private static XRCameraSubsystemDescriptor GetSubsystemDescriptor()
-        {
-            List<XRCameraSubsystemDescriptor> descriptors = new List<XRCameraSubsystemDescriptor>();
-            SubsystemManager.GetSubsystemDescriptors(descriptors);
-            return descriptors.FirstOrDefault(d => d.id != ID);
-        }
-
-        #endregion
-
-        #region Types
-
-        private class Provider : IProvider
+        private class MockProvider : Provider
         {
             private XRCameraParams cameraParams;
+            private Feature m_lightEstimation = Feature.None;
+            private Feature m_currentCamera = Feature.None;
             private long? timestamp;
             private Vector2? screenSize;
             private ScreenOrientation? screenOrientation;
+            private Material m_CameraMaterial;
+
+            [Preserve]
+            public MockProvider()
+            {
+                m_CameraMaterial = CreateCameraMaterial("Unlit/Texture");
+            }
+
+            // BUG: https://issuetracker.unity3d.com/issues/commandbuffer-native-plugin-events-hang-in-the-editor?_gl=1*2dhykv*_ga*MTk0OTU1NTU0NC4xNTg2OTI5MTgy*_ga_1S78EFL1W5*MTYyNjE2MDcyNS45Mi4xLjE2MjYxNjE4NDAuNjA.&_ga=2.177364768.441796193.1626072944-1949555544.1586929182
+            // Until this gets fixed -> camera background cannot be renderred in Editor as it hangs Unity when re-enterring Play Mode.
+            public override Material cameraMaterial => m_CameraMaterial;
 
             public override bool permissionGranted => CameraApi.permissionGranted;
+
+            public override Feature currentLightEstimation => this.m_lightEstimation;
+
+            public override Feature requestedLightEstimation
+            {
+                get => this.m_lightEstimation;
+                set => this.m_lightEstimation = value;
+            }
+
+            public override Feature currentCamera => this.m_currentCamera;
+
+            public override Feature requestedCamera
+            {
+                get => this.m_currentCamera;
+                set => this.m_currentCamera = value;
+            }
 
             public override void Start()
             {
@@ -159,11 +91,17 @@ namespace UnityEngine.XR.Mock
                 base.Stop();
             }
 
+            public override void Destroy()
+            {
+                CameraApi.Reset();
+                Object.Destroy(this.m_CameraMaterial);
+                base.Destroy();
+            }
+
             public override bool TryGetFrame(XRCameraParams cameraParams, out XRCameraFrame cameraFrame)
             {
-                var timestamp = CameraApi.timestamp;
                 if (this.cameraParams != cameraParams
-                    || this.timestamp != timestamp
+                    || this.timestamp != CameraApi.timestampNs
                     || this.screenSize != CameraApi.screenSize
                     || this.screenOrientation != CameraApi.screenOrientation)
                 {
@@ -171,29 +109,19 @@ namespace UnityEngine.XR.Mock
                     {
                         var result = new XRCameraFrameMock();
 
-                        if (CameraApi.timestamp.HasValue)
+                        void SetProperty<T>(XRCameraFrameProperties prop, T? input, ref T output) where T : struct
                         {
-                            result.m_TimestampNs = CameraApi.timestamp.Value;
-                            result.m_Properties = result.m_Properties | XRCameraFrameProperties.Timestamp;
+                            if (input.HasValue)
+                            {
+                                output = input.Value;
+                                result.m_Properties = result.m_Properties | prop;
+                            }
                         }
 
-                        if (CameraApi.averageBrightness.HasValue)
-                        {
-                            result.m_AverageColorTemperature = CameraApi.averageBrightness.Value;
-                            result.m_Properties = result.m_Properties | XRCameraFrameProperties.AverageBrightness;
-                        }
-
-                        if (CameraApi.averageColorTemperature.HasValue)
-                        {
-                            result.m_AverageColorTemperature = CameraApi.averageColorTemperature.Value;
-                            result.m_Properties = result.m_Properties | XRCameraFrameProperties.AverageColorTemperature;
-                        }
-
-                        if (CameraApi.colorCorrection.HasValue)
-                        {
-                            result.m_ColorCorrection = CameraApi.colorCorrection.Value;
-                            result.m_Properties = result.m_Properties | XRCameraFrameProperties.ColorCorrection;
-                        }
+                        SetProperty(XRCameraFrameProperties.Timestamp, CameraApi.timestampNs, ref result.m_TimestampNs);
+                        SetProperty(XRCameraFrameProperties.AverageBrightness, CameraApi.averageBrightness, ref result.m_AverageBrightness);
+                        SetProperty(XRCameraFrameProperties.AverageColorTemperature, CameraApi.averageColorTemperature, ref result.m_AverageColorTemperature);
+                        SetProperty(XRCameraFrameProperties.ColorCorrection, CameraApi.colorCorrection, ref result.m_ColorCorrection);
 
                         if (CameraApi.projectionMatrix.HasValue)
                         {
@@ -217,13 +145,18 @@ namespace UnityEngine.XR.Mock
                             result.m_Properties = result.m_Properties | XRCameraFrameProperties.ProjectionMatrix;
                         }
 
-                        if (CameraApi.displayMatrix.HasValue)
-                        {
-                            result.m_DisplayMatrix = CameraApi.displayMatrix.Value;
-                            result.m_Properties = result.m_Properties | XRCameraFrameProperties.DisplayMatrix;
-                        }
+                        SetProperty(XRCameraFrameProperties.DisplayMatrix, CameraApi.displayMatrix, ref result.m_DisplayMatrix);
+                        SetProperty(XRCameraFrameProperties.AverageIntensityInLumens, CameraApi.averageIntensityInLumens, ref result.m_AverageIntensityInLumens);
+                        SetProperty(XRCameraFrameProperties.ExposureDuration, CameraApi.exposureDuration, ref result.m_ExposureDuration);
+                        SetProperty(XRCameraFrameProperties.ExposureOffset, CameraApi.exposureOffset, ref result.m_ExposureOffset);
+                        SetProperty(XRCameraFrameProperties.MainLightIntensityLumens, CameraApi.mainLightIntensityLumens, ref result.m_MainLightIntensityLumens);
+                        SetProperty(XRCameraFrameProperties.MainLightColor, CameraApi.mainLightColor, ref result.m_MainLightColor);
+                        SetProperty(XRCameraFrameProperties.MainLightDirection, CameraApi.mainLightDirection, ref result.m_MainLightDirection);
+                        SetProperty(XRCameraFrameProperties.AmbientSphericalHarmonics, CameraApi.ambientSphericalHarmonics, ref result.m_AmbientSphericalHarmonics);
+                        SetProperty(XRCameraFrameProperties.CameraGrain, CameraApi.cameraGrain, ref result.m_CameraGrain);
+                        SetProperty(XRCameraFrameProperties.NoiseIntensity, CameraApi.noiseIntensity, ref result.m_NoiseIntensity);
 
-                        result.m_TrackingState = TrackingState.Tracking;
+                        result.m_TrackingState = CameraApi.trackingState;
                         result.m_NativePtr = IntPtr.Zero;
 
                         result.Convert(out cameraFrame);
@@ -231,8 +164,8 @@ namespace UnityEngine.XR.Mock
                     }
                     finally
                     {
-                        this.timestamp = timestamp;
                         this.cameraParams = cameraParams;
+                        this.timestamp = CameraApi.timestampNs;
                         this.screenSize = CameraApi.screenSize;
                         this.screenOrientation = CameraApi.screenOrientation;
                     }
@@ -240,6 +173,30 @@ namespace UnityEngine.XR.Mock
 
                 cameraFrame = default;
                 return false;
+            }
+
+            public unsafe override NativeArray<XRTextureDescriptor> GetTextureDescriptors(XRTextureDescriptor defaultDescriptor, Allocator allocator)
+            {
+                if (CameraApi.frameTextures != null)
+                {
+                    return new NativeArray<XRTextureDescriptor>(
+                        CameraApi.frameTextures
+                            .Select((m, i) => new XRTextureDescriptorMock()
+                            {
+                                m_NativeTexture = m.GetNativeTexturePtr(),
+                                m_PropertyNameId = Shader.PropertyToID("_MainTex"),
+                                m_Depth = 1,
+                                m_Dimension = m.dimension,
+                                m_Format = m.format,
+                                m_Width = m.width,
+                                m_Height = m.height,
+                                m_MipmapCount = m.mipmapCount
+                            }.Convert())
+                            .ToArray(),
+                        allocator);
+                }
+
+                return base.GetTextureDescriptors(default, allocator);
             }
 
             private void ResetState()
@@ -327,6 +284,81 @@ namespace UnityEngine.XR.Mock
             /// </value>
             public XRCameraFrameProperties m_Properties;
 
+            /// <summary>
+            /// The estimated intensity, in lumens, of the scene.
+            /// </summary>
+            /// <value>
+            /// The estimated intensity, in lumens, of the scene.
+            /// </value>
+            public float m_AverageIntensityInLumens;
+
+            /// <summary>
+            /// The camera exposure duration, in seconds with sub-millisecond precision, of the scene.
+            /// </summary>
+            /// <value>
+            /// The camera exposure duration, in seconds with sub-millisecond precision, of the scene.
+            /// </value>
+            public double m_ExposureDuration;
+
+            /// <summary>
+            /// The camera exposure offset of the scene for lighting scaling
+            /// </summary>
+            /// <value>
+            /// The camera exposure offset of the scene for lighting scaling
+            /// </value>
+            public float m_ExposureOffset;
+
+            /// <summary>
+            /// The estimated, intensity in lumens of the most influential, real-world light in the scene.
+            /// </summary>
+            /// <value>
+            /// The estimated, intensity in lumens of the most influential, real-world light in the scene.
+            /// </value>
+            public float m_MainLightIntensityLumens;
+
+            /// <summary>
+            /// The estimated, color of the most influential, real-world light in the scene.
+            /// </summary>
+            /// <value>
+            /// The estimated, color of the most influential, real-world light in the scene.
+            /// </value>
+            public Color m_MainLightColor;
+
+            /// <summary>
+            /// The estimated direction of the most influential, real-world light in the scene.
+            /// </summary>
+            /// <value>
+            /// The estimated direction of the most influential, real-world light in the scene.
+            /// </value>
+            public Vector3 m_MainLightDirection;
+
+            /// <summary>
+            /// The ambient spherical harmonic coefficients that represent lighting in the real-world.
+            /// </summary>
+            /// <value>
+            /// The ambient spherical harmonic coefficients that represent lighting in the real-world.
+            /// </value>
+            /// <remarks>
+            /// See <see href="https://docs.unity3d.com/ScriptReference/Rendering.SphericalHarmonicsL2.html">here</see> for further details.
+            /// </remarks>
+            public SphericalHarmonicsL2 m_AmbientSphericalHarmonics;
+
+            /// <summary>
+            /// A texture that simulates the camera's noise.
+            /// </summary>
+            /// <value>
+            /// A texture that simulates the camera's noise.
+            /// </value>
+            public XRTextureDescriptor m_CameraGrain;
+
+            /// <summary>
+            /// The level of intensity of camera grain noise in a scene.
+            /// </summary>
+            /// <value>
+            /// The level of intensity of camera grain noise in a scene.
+            /// </value>
+            public float m_NoiseIntensity;
+
             public unsafe void Convert(out XRCameraFrame target)
             {
                 fixed (XRCameraFrame* targetPtr = &target)
@@ -337,6 +369,92 @@ namespace UnityEngine.XR.Mock
             }
         }
 
-        #endregion
+        [StructLayout(LayoutKind.Sequential)]
+        private struct XRTextureDescriptorMock
+        {
+            /// <summary>
+            /// A pointer to the native texture object.
+            /// </summary>
+            /// <value>
+            /// A pointer to the native texture object.
+            /// </value>
+            public IntPtr m_NativeTexture;
+
+            /// <summary>
+            /// Specifies the width dimension of the native texture object.
+            /// </summary>
+            /// <value>
+            /// The width of the native texture object.
+            /// </value>
+            public int m_Width;
+
+            /// <summary>
+            /// Specifies the height dimension of the native texture object.
+            /// </summary>
+            /// <value>
+            /// The height of the native texture object.
+            /// </value>
+            public int m_Height;
+
+            /// <summary>
+            /// Specifies the number of mipmap levels in the native texture object.
+            /// </summary>
+            /// <value>
+            /// The number of mipmap levels in the native texture object.
+            /// </value>
+            public int m_MipmapCount;
+
+            /// <summary>
+            /// Specifies the texture format of the native texture object.
+            /// </summary>
+            /// <value>
+            /// The format of the native texture object.
+            /// </value>
+            public TextureFormat m_Format;
+
+            /// <summary>
+            /// Specifies the unique shader property name ID for the material shader texture.
+            /// </summary>
+            /// <value>
+            /// The unique shader property name ID for the material shader texture.
+            /// </value>
+            /// <remarks>
+            /// Use the static method <c>Shader.PropertyToID(string name)</c> to get the unique identifier.
+            /// </remarks>
+            public int m_PropertyNameId;
+
+            /// <summary>
+            /// This specifies the depth dimension of the native texture. For a 3D texture, depth would be greater than zero.
+            /// For any other kind of valid texture, depth is one.
+            /// </summary>
+            /// <value>
+            /// The depth dimension of the native texture object.
+            /// </value>
+            public int m_Depth;
+
+            /// <summary>
+            /// Specifies the [texture dimension](https://docs.unity3d.com/ScriptReference/Rendering.TextureDimension.html) of the native texture object.
+            /// </summary>
+            /// <value>
+            /// The texture dimension of the native texture object.
+            /// </value>
+            public TextureDimension m_Dimension;
+
+            public unsafe XRTextureDescriptor Convert()
+            {
+                var result = new XRTextureDescriptor();
+                Convert(out result);
+                return result;
+            }
+
+            public unsafe void Convert(out XRTextureDescriptor target)
+            {
+                fixed (XRTextureDescriptor* targetPtr = &target)
+                fixed (XRTextureDescriptorMock* selfPtr = &this)
+                {
+                    UnsafeUtility.MemCpy(targetPtr, selfPtr, sizeof(XRTextureDescriptor));
+                }
+            }
+        }
     }
 }

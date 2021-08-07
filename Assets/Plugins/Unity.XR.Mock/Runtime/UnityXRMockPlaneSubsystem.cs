@@ -1,7 +1,4 @@
-﻿using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using Unity.Collections;
+﻿using Unity.Collections;
 using UnityEngine.Scripting;
 using UnityEngine.XR.ARSubsystems;
 
@@ -10,178 +7,52 @@ namespace UnityEngine.XR.Mock
     [Preserve]
     public sealed class UnityXRMockPlaneSubsystem : XRPlaneSubsystem
     {
-        #region Constants
-
-        public const string ID = "UnityXRMock-Plane";
-
-        #endregion
-
-        #region Fields
-
-        private bool isInitialized;
-        private XRPlaneSubsystem wrappedSubsystem;
-        private static XRPlaneSubsystemDescriptor originalDescriptor;
-
-        #endregion
-
-        #region Constructors
-
-        public UnityXRMockPlaneSubsystem()
-        {
-            this.Initialize();
-        }
-
-        #endregion
-
-        #region XRPlaneSubsystem
-
-        public override void Start()
-        {
-            if (this.wrappedSubsystem != null)
-            {
-                this.wrappedSubsystem.Start();
-            }
-
-            base.Start();
-        }
-
-        public override TrackableChanges<BoundedPlane> GetChanges(Allocator allocator)
-        {
-            if (this.wrappedSubsystem != null)
-            {
-                return this.wrappedSubsystem.GetChanges(allocator);
-            }
-
-            return base.GetChanges(allocator);
-        }
-
-        public override void Stop()
-        {
-            if (this.wrappedSubsystem != null)
-            {
-                this.wrappedSubsystem.Stop();
-            }
-
-            base.Stop();
-        }
-
-        //public override void Destroy()
-        //{
-        //    if (this.wrappedSubsystem != null)
-        //    {
-        //        this.wrappedSubsystem.Destroy();
-        //    }
-        //
-        //    base.Destroy();
-        //}
-
-        protected override IProvider CreateProvider()
-        {
-            this.Initialize();
-            return this.wrappedSubsystem?.GetType()
-                                         .GetMethod(nameof(CreateProvider), BindingFlags.NonPublic | BindingFlags.Instance)
-                                         .Invoke(this.wrappedSubsystem, null) as IProvider ?? new Provider();
-        }
-
-        #endregion
-
-        #region Internal methods
-
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         internal static void Register()
         {
-            var descriptor = GetSubsystemDescriptor();
-            RegisterDescriptor(descriptor);
+            XRPlaneSubsystemDescriptor.Create(new XRPlaneSubsystemDescriptor.Cinfo
+            {
+                id = typeof(UnityXRMockPlaneSubsystem).FullName,
+                providerType = typeof(MockProvider),
+                subsystemTypeOverride = typeof(UnityXRMockPlaneSubsystem),
+                supportsHorizontalPlaneDetection = true,
+                supportsVerticalPlaneDetection = true,
+                supportsArbitraryPlaneDetection = true,
+                supportsBoundaryVertices = true,
+                supportsClassification = true
+            });
         }
 
-        #endregion
-
-        #region Private methods
-
-        private void Initialize()
+        private class MockProvider : Provider
         {
-            if (this.isInitialized)
-            {
-                return;
-            }
+            private PlaneDetectionMode _currentPlaneDetectionMode;
 
-            if (!UnityXRMockActivator.Active)
-            {
-                if (originalDescriptor == null)
-                {
-                    originalDescriptor = GetSubsystemDescriptor();
-                }
+            [Preserve]
+            public MockProvider() { }
 
-                this.wrappedSubsystem = originalDescriptor?.Create();
-            }
+            public override void Start() { }
 
-            this.isInitialized = true;
-        }
-
-        private static void RegisterDescriptor(XRPlaneSubsystemDescriptor overrideDescriptor = default)
-        {
-            if (overrideDescriptor != null)
-            {
-                // Clone descriptor
-                var cinfo = new XRPlaneSubsystemDescriptor.Cinfo
-                {
-                    id = overrideDescriptor.id,
-                    subsystemImplementationType = overrideDescriptor.subsystemImplementationType,
-                    supportsArbitraryPlaneDetection = overrideDescriptor.supportsArbitraryPlaneDetection,
-                    supportsBoundaryVertices = overrideDescriptor.supportsBoundaryVertices,
-                    supportsHorizontalPlaneDetection = overrideDescriptor.supportsHorizontalPlaneDetection,
-                    supportsVerticalPlaneDetection = overrideDescriptor.supportsVerticalPlaneDetection
-                };
-
-                originalDescriptor = typeof(XRPlaneSubsystemDescriptor).GetConstructors(BindingFlags.NonPublic | BindingFlags.Instance)[0]
-                                                                       .Invoke(new object[] { cinfo }) as XRPlaneSubsystemDescriptor;
-
-                // Override subsystem
-                overrideDescriptor.subsystemImplementationType = typeof(UnityXRMockPlaneSubsystem);
-            }
-            else
-            {
-                XRPlaneSubsystemDescriptor.Create(new XRPlaneSubsystemDescriptor.Cinfo
-                {
-                    id = ID,
-                    subsystemImplementationType = typeof(UnityXRMockPlaneSubsystem),
-                    supportsHorizontalPlaneDetection = true,
-                    supportsVerticalPlaneDetection = true,
-                    supportsArbitraryPlaneDetection = true,
-                    supportsBoundaryVertices = true
-                });
-            }
-        }
-
-        private static XRPlaneSubsystemDescriptor GetSubsystemDescriptor()
-        {
-            List<XRPlaneSubsystemDescriptor> descriptors = new List<XRPlaneSubsystemDescriptor>();
-            SubsystemManager.GetSubsystemDescriptors(descriptors);
-            return descriptors.FirstOrDefault(d => d.id != ID);
-        }
-
-        #endregion
-
-        #region Types
-
-        private class Provider : IProvider
-        {
             public override void Destroy()
             {
-                NativeApi.UnityXRMock_planesReset();
+                PlaneApi.Reset();
             }
 
-            public override void GetBoundary(
-                TrackableId trackableId,
-                Allocator allocator,
-                ref NativeArray<Vector2> boundary)
+            public override void Stop() { }
+
+            public override PlaneDetectionMode requestedPlaneDetectionMode
             {
-                if (NativeApi.planes.TryGetValue(trackableId, out NativeApi.PlaneInfo planeInfo) &&
-                    planeInfo.boundaryPoints != null &&
-                    planeInfo.boundaryPoints.Length > 0)
+                get => this._currentPlaneDetectionMode;
+                set => this._currentPlaneDetectionMode = value;
+            }
+
+            public override PlaneDetectionMode currentPlaneDetectionMode => this._currentPlaneDetectionMode;
+
+            public override void GetBoundary(TrackableId trackableId, Allocator allocator, ref NativeArray<Vector2> boundary)
+            {
+                if (PlaneApi.TryGetPlaneData(trackableId, out Vector2[] boundaryPoints))
                 {
-                    CreateOrResizeNativeArrayIfNecessary(planeInfo.boundaryPoints.Length, allocator, ref boundary);
-                    boundary.CopyFrom(planeInfo.boundaryPoints);
+                    CreateOrResizeNativeArrayIfNecessary(boundaryPoints.Length, allocator, ref boundary);
+                    boundary.CopyFrom(boundaryPoints);
                 }
                 else if (boundary.IsCreated)
                 {
@@ -189,28 +60,8 @@ namespace UnityEngine.XR.Mock
                 }
             }
 
-            public override TrackableChanges<BoundedPlane> GetChanges(
-                BoundedPlane defaultPlane,
-                Allocator allocator)
-            {
-                try
-                {
-                    return TrackableChanges<BoundedPlane>.CopyFrom(
-                        new NativeArray<BoundedPlane>(
-                            NativeApi.addedPlanes.Select(m => m.ToBoundedPlane(defaultPlane)).ToArray(), allocator),
-                        new NativeArray<BoundedPlane>(
-                            NativeApi.updatedPlanes.Select(m => m.ToBoundedPlane(defaultPlane)).ToArray(), allocator),
-                        new NativeArray<TrackableId>(
-                            NativeApi.removedPlanes.Select(m => m.id).ToArray(), allocator),
-                        allocator);
-                }
-                finally
-                {
-                    NativeApi.UnityXRMock_consumedPlaneChanges();
-                }
-            }
+            public override TrackableChanges<BoundedPlane> GetChanges(BoundedPlane defaultPlane, Allocator allocator)
+                => PlaneApi.ConsumeChanges(defaultPlane, allocator);
         }
-
-        #endregion
     }
 }

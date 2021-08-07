@@ -4,5 +4,28 @@
 EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
-  m_Scenes: []
-  m_configObjects: {}
+  m_Scenes:
+  - enabled: 1
+    path: Assets/Scenes/SampleScene.unity
+    guid: 9fc0d4010bbf28b4594072e72b8655ab
+  m_configObjects:
+    UnityEditor.XR.ARCore.ARCoreSettings: {fileID: 11400000, guid: 273994ce22427e2458c3e6021c045e17,
+      type: 2}
+    UnityEditor.XR.ARKit.ARKitSettings: {fileID: 11400000, guid: 3393a36b8c071e545bf3c620be1cef7d,
+      type: 2}
+    com.unity.xr.arkit.PlayerSettings: {fileID: 11400000, guid: 3393a36b8c071e545bf3c620be1cef7d,
+      type: 2}
+    com.unity.xr.management.arcore_loader: {fileID: 11400000, guid: ca11dc16dcfc01347908e6dedb78350f,
+      type: 2}
+    com.unity.xr.management.arkit_loader: {fileID: 11400000, guid: a24524b8ef655ec4c9b16c50a4d08091,
+      type: 2}
+    com.unity.xr.management.build: {fileID: 11400000, guid: 7788437afd9293f42bc09cae64b60325,
+      type: 2}
+    com.unity.xr.management.loader: {fileID: 11400000, guid: 5a07cf6d7402fb84588a6f627cea50fd,
+      type: 2}
+    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: 13cc4a825ac8be84b88dbe9fe4dac09e,
+      type: 2}
+    com.unity.xr.management.xrmock_loader: {fileID: 11400000, guid: 5a07cf6d7402fb84588a6f627cea50fd,
+      type: 2}
+    com.unity.xr.mock.PlayerSettings: {fileID: 11400000, guid: 7788437afd9293f42bc09cae64b60325,
+      type: 2}
